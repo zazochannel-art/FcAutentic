@@ -4,8 +4,8 @@
   <path d="M74 20l28 28-28 28-28-28 28-28Z" fill="url(#g)" opacity=".88"/>
   <defs>
     <linearGradient id="g" x1="46" y1="20" x2="102" y2="76">
-      <stop stop-color="#06B6D4"/>
-      <stop offset="1" stop-color="#8B5CF6"/>
+      <stop stop-color="#16A34A"/>
+      <stop offset="1" stop-color="#22C55E"/>
     </linearGradient>
   </defs>
 </svg>
