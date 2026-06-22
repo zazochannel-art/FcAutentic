@@ -1,4 +1,4 @@
-const CACHE_NAME = "fc-autentic-v2";
+const CACHE_NAME = "fc-autentic-v3";
 const ASSETS = ["/", "/index.html", "/manifest.webmanifest", "/icon.svg", "/styles.css", "/app.js", "/fc-autentic-logo-small.png", "/hero-football.jpg"];
 
 self.addEventListener("install", (event) => {
@@ -14,8 +14,22 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
-  if (event.request.mode === "navigate") {
-    event.respondWith(fetch(event.request).catch(() => caches.match("/index.html")));
+  const url = new URL(event.request.url);
+  const isApplicationAsset =
+    event.request.mode === "navigate" ||
+    url.pathname.endsWith("/app.js") ||
+    url.pathname.endsWith("/styles.css");
+
+  if (isApplicationAsset) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+          return response;
+        })
+        .catch(() => caches.match(event.request).then((cached) => cached || caches.match("/index.html"))),
+    );
     return;
   }
   event.respondWith(
