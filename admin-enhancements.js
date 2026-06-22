@@ -45,9 +45,8 @@
     .fc-row{display:grid;grid-template-columns:1.4fr 1fr 1fr auto;gap:10px;align-items:center;padding:12px;border:1px solid rgba(255,255,255,.08);border-radius:12px}
     .fc-btn{border:0;border-radius:10px;padding:9px 12px;background:#06b6d4;color:#09090b;font-weight:700;cursor:pointer}
     .fc-btn-danger{background:#7f1d1d;color:#fff}.fc-input{width:100%;border:1px solid rgba(255,255,255,.12);border-radius:10px;background:#27272a;color:#fafafa;padding:10px}
-    .fc-modal{position:fixed;inset:0;z-index:10000;display:grid;place-items:center;padding:20px;background:rgba(0,0,0,.75)}
-    .fc-modal-card{width:min(620px,100%);max-height:90vh;overflow:auto;border:1px solid rgba(255,255,255,.12);border-radius:16px;background:#18181b;padding:22px}
     .fc-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.fc-form label{color:#a1a1aa;font-size:13px}.fc-form .wide{grid-column:1/-1}
+    .fc-inline-form{grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;width:100%}.fc-inline-form label{color:#a1a1aa;font-size:12px}.fc-inline-actions{grid-column:1/-1;display:flex;gap:8px}.fc-editable{cursor:pointer}.fc-editable:hover{border-color:rgba(6,182,212,.45)}
     .fc-command{margin-bottom:20px;overflow:hidden;border:1px solid rgba(255,255,255,.1);border-radius:16px;background:#18181b}
     .fc-command-inner{display:grid;grid-template-columns:1.2fr .8fr;gap:24px;padding:26px}.fc-command-logo{width:76px;height:76px;object-fit:contain}
     .fc-command-stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.fc-command-stat{padding:14px;border-radius:12px;background:rgba(255,255,255,.04)}
@@ -55,21 +54,26 @@
   `;
   document.head.appendChild(style);
 
-  const modal = (title, fields, save) => {
-    const node = document.createElement("div");
-    node.className = "fc-modal";
-    node.innerHTML = `<div class="fc-modal-card"><div class="fc-tools-head"><h2>${esc(title)}</h2><button class="fc-btn fc-close">Inchide</button></div><form class="fc-form">${fields.map((field) => `<label class="${field.wide ? "wide" : ""}">${esc(field.label)}${field.type === "select" ? `<select class="fc-input" name="${field.name}">${field.options.map((option) => `<option value="${esc(option.value)}" ${option.value === field.value ? "selected" : ""}>${esc(option.label)}</option>`).join("")}</select>` : `<input class="fc-input" name="${field.name}" type="${field.type || "text"}" value="${esc(field.value)}">`}</label>`).join("")}<button class="fc-btn wide" type="submit">Salveaza modificarile</button></form></div>`;
-    node.querySelector(".fc-close").onclick = () => node.remove();
-    node.onclick = (event) => { if (event.target === node) node.remove(); };
-    node.querySelector("form").onsubmit = async (event) => {
+  const inlineEditor = (row, fields, save) => {
+    if (row.querySelector("form")) return;
+    const original = row.innerHTML;
+    row.innerHTML = `<form class="fc-inline-form">${fields.map((field) => `<label>${esc(field.label)}${field.type === "select" ? `<select class="fc-input" name="${field.name}">${field.options.map((option) => `<option value="${esc(option.value)}" ${option.value === field.value ? "selected" : ""}>${esc(option.label)}</option>`).join("")}</select>` : `<input class="fc-input" name="${field.name}" type="${field.type || "text"}" value="${esc(field.value)}">`}</label>`).join("")}<div class="fc-inline-actions"><button class="fc-btn" type="submit">Salveaza</button><button class="fc-btn fc-btn-danger fc-cancel" type="button">Anuleaza</button></div></form>`;
+    row.querySelector(".fc-cancel").onclick = () => { row.innerHTML = original; bindDoubleClick(row); };
+    row.querySelector("form").onsubmit = async (event) => {
       event.preventDefault();
       try {
         await save(Object.fromEntries(new FormData(event.currentTarget)));
-        node.remove();
         await render(true);
       } catch (error) { alert(error.message); }
     };
-    document.body.appendChild(node);
+  };
+
+  const bindDoubleClick = (row, handler = row._fcEditHandler) => {
+    row._fcEditHandler = handler;
+    row.ondblclick = (event) => {
+      if (event.target.closest("button,input,select")) return;
+      handler?.();
+    };
   };
 
   const panel = (title) => {
@@ -101,20 +105,19 @@
   const users = async () => {
     const grid = panel("Editare roluri utilizatori");
     const rows = await request("/rest/v1/profiles?select=id,full_name,email,role&order=created_at.desc");
-    grid.innerHTML = rows.map((row) => `<div class="fc-row"><strong>${esc(row.full_name || row.email)}</strong><span>${esc(row.email)}</span><select class="fc-input fc-role" data-id="${row.id}">${["administrator","director_sportiv","antrenor","jucator","parinte"].map((role) => `<option ${role === row.role ? "selected" : ""}>${role}</option>`).join("")}</select><button class="fc-btn fc-role-save" data-id="${row.id}">Salveaza</button></div>`).join("");
-    grid.querySelectorAll(".fc-role-save").forEach((button) => button.onclick = async () => {
-      const role = grid.querySelector(`.fc-role[data-id="${button.dataset.id}"]`).value;
-      await request(`/rest/v1/profiles?id=eq.${button.dataset.id}`, { method: "PATCH", body: JSON.stringify({ role }) });
+    grid.innerHTML = rows.map((row) => `<div class="fc-row fc-editable" title="Dublu click pentru schimbarea rolului"><strong>${esc(row.full_name || row.email)}</strong><span>${esc(row.email)}</span><span>${esc(row.role)}</span><small style="color:#a1a1aa">Dublu click</small></div>`).join("");
+    [...grid.children].forEach((node, index) => bindDoubleClick(node, () => inlineEditor(node, [{ name: "role", label: "Rol", type: "select", value: rows[index].role, options: ["administrator","director_sportiv","antrenor","jucator","parinte"].map((role) => ({ value: role, label: role })) }], async ({ role }) => {
+      await request(`/rest/v1/profiles?id=eq.${rows[index].id}`, { method: "PATCH", body: JSON.stringify({ role }) });
       alert("Rol salvat. Utilizatorul trebuie sa se autentifice din nou.");
-    });
+    })));
   };
 
   const players = async (parentsOnly = false) => {
     const grid = panel(parentsOnly ? "Editare parinti si tutori" : "Editare jucatori");
     const rows = await request("/rest/v1/players?select=id,first_name,last_name,birth_date,position,shirt_number,height_cm,weight_kg,dominant_foot,phone,email,guardian_name,guardian_phone,registration_status&order=last_name");
-    grid.innerHTML = rows.map((row) => `<div class="fc-row"><strong>${esc(row.first_name)} ${esc(row.last_name)}</strong><span>${esc(parentsOnly ? row.guardian_name || "Fara tutore" : row.position || "-")}</span><span>${esc(parentsOnly ? row.guardian_phone || "-" : row.email || "-")}</span><button class="fc-btn fc-edit" data-id="${row.id}">Redacteaza</button></div>`).join("");
-    grid.querySelectorAll(".fc-edit").forEach((button) => button.onclick = () => {
-      const row = rows.find((item) => item.id === button.dataset.id);
+    grid.innerHTML = rows.map((row) => `<div class="fc-row fc-editable" title="Dublu click pentru redactare"><strong>${esc(row.first_name)} ${esc(row.last_name)}</strong><span>${esc(parentsOnly ? row.guardian_name || "Fara tutore" : row.position || "-")}</span><span>${esc(parentsOnly ? row.guardian_phone || "-" : row.email || "-")}</span><small style="color:#a1a1aa">Dublu click</small></div>`).join("");
+    [...grid.children].forEach((node, index) => bindDoubleClick(node, () => {
+      const row = rows[index];
       const fields = parentsOnly ? [
         { name: "guardian_name", label: "Parinte / tutore", value: row.guardian_name || "" },
         { name: "guardian_phone", label: "Telefon tutore", value: row.guardian_phone || "" },
@@ -125,22 +128,22 @@
         { name: "weight_kg", label: "Greutate", type: "number", value: row.weight_kg || "" }, { name: "phone", label: "Telefon", value: row.phone || "" },
         { name: "guardian_name", label: "Tutore", value: row.guardian_name || "" }, { name: "guardian_phone", label: "Telefon tutore", value: row.guardian_phone || "" },
       ];
-      modal(parentsOnly ? "Redacteaza tutorele" : "Redacteaza jucatorul", fields, (values) => request(`/rest/v1/players?id=eq.${row.id}`, { method: "PATCH", body: JSON.stringify(values) }));
-    });
+      inlineEditor(node, fields, (values) => request(`/rest/v1/players?id=eq.${row.id}`, { method: "PATCH", body: JSON.stringify(values) }));
+    }));
   };
 
   const coaches = async () => {
     const grid = panel("Editare antrenori");
     const rows = await request("/rest/v1/coaches?select=*&order=full_name");
-    grid.innerHTML = rows.map((row) => `<div class="fc-row"><strong>${esc(row.full_name)}</strong><span>${esc(row.role_title)}</span><span>${esc(row.phone || row.email || "-")}</span><button class="fc-btn fc-edit" data-id="${row.id}">Redacteaza</button></div>`).join("");
-    grid.querySelectorAll(".fc-edit").forEach((button) => button.onclick = () => {
-      const row = rows.find((item) => item.id === button.dataset.id);
-      modal("Redacteaza antrenorul", [
+    grid.innerHTML = rows.map((row) => `<div class="fc-row fc-editable" title="Dublu click pentru redactare"><strong>${esc(row.full_name)}</strong><span>${esc(row.role_title)}</span><span>${esc(row.phone || row.email || "-")}</span><small style="color:#a1a1aa">Dublu click</small></div>`).join("");
+    [...grid.children].forEach((node, index) => bindDoubleClick(node, () => {
+      const row = rows[index];
+      inlineEditor(node, [
         { name: "full_name", label: "Nume", value: row.full_name }, { name: "role_title", label: "Rol", value: row.role_title },
         { name: "phone", label: "Telefon", value: row.phone || "" }, { name: "email", label: "Email", value: row.email || "" },
         { name: "schedule", label: "Program", value: row.schedule || "", wide: true }, { name: "permissions", label: "Permisiuni", value: row.permissions || "", wide: true },
       ], (values) => request(`/rest/v1/coaches?id=eq.${row.id}`, { method: "PATCH", body: JSON.stringify(values) }));
-    });
+    }));
   };
 
   const attendance = async () => {
