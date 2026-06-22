@@ -9,7 +9,12 @@ for (const file of [
   "index.html",
   "app.js",
   "styles.css",
-  "fc-autentic-logo-hq.png",
+  "fc-autentic-logo-small.png",
+  "hero-football.jpg",
+  "academy-1.jpg",
+  "academy-2.jpg",
+  "academy-3.jpg",
+  "academy-4.jpg",
   "manifest.webmanifest",
   "icon.svg",
   "sw.js"
