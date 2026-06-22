@@ -132,6 +132,77 @@
     }));
   };
 
+  const originalPlayerTable = async () => {
+    const host = content();
+    const table = [...(host?.querySelectorAll("table") || [])].find((candidate) =>
+      candidate.textContent?.includes("Jucator") &&
+      candidate.textContent?.includes("Categorie") &&
+      candidate.textContent?.includes("Statistici"),
+    );
+    if (!table) return;
+
+    const players = await request("/rest/v1/players?select=id,first_name,last_name,birth_date,position,shirt_number,height_cm,weight_kg,dominant_foot,phone,email,guardian_name,guardian_phone&registration_status=eq.active&order=last_name");
+    const tableRows = [...table.querySelectorAll("tbody tr")];
+
+    tableRows.forEach((tableRow) => {
+      if (tableRow.dataset.fcInlineReady === "true") return;
+      const email = [...tableRow.querySelectorAll("td")].map((cell) => cell.textContent || "").join(" ");
+      const player = players.find((item) => item.email && email.includes(item.email)) ||
+        players.find((item) => email.toLowerCase().includes(`${item.first_name} ${item.last_name}`.toLowerCase()));
+      if (!player) return;
+
+      tableRow.dataset.fcInlineReady = "true";
+      tableRow.classList.add("fc-editable");
+      tableRow.title = "Dublu click pentru redactarea jucatorului";
+      tableRow.ondblclick = (event) => {
+        if (event.target.closest("button,input,select")) return;
+        if (tableRow.querySelector("form")) return;
+        const original = tableRow.innerHTML;
+        const columnCount = table.querySelectorAll("thead th").length || 6;
+        tableRow.innerHTML = `<td colspan="${columnCount}" style="padding:16px"><form class="fc-inline-form">
+          <label>Prenume<input class="fc-input" name="first_name" value="${esc(player.first_name)}"></label>
+          <label>Nume<input class="fc-input" name="last_name" value="${esc(player.last_name)}"></label>
+          <label>Data nasterii<input class="fc-input" name="birth_date" type="date" value="${esc(player.birth_date || "")}"></label>
+          <label>Pozitie<input class="fc-input" name="position" value="${esc(player.position || "")}"></label>
+          <label>Numar tricou<input class="fc-input" name="shirt_number" type="number" min="1" max="99" value="${esc(player.shirt_number || "")}"></label>
+          <label>Inaltime (cm)<input class="fc-input" name="height_cm" type="number" value="${esc(player.height_cm || "")}"></label>
+          <label>Greutate (kg)<input class="fc-input" name="weight_kg" type="number" step="0.1" value="${esc(player.weight_kg || "")}"></label>
+          <label>Picior dominant<select class="fc-input" name="dominant_foot">
+            <option value="">Alege</option>
+            <option value="drept" ${player.dominant_foot === "drept" ? "selected" : ""}>Drept</option>
+            <option value="stang" ${player.dominant_foot === "stang" ? "selected" : ""}>Stang</option>
+            <option value="ambele" ${player.dominant_foot === "ambele" ? "selected" : ""}>Ambele</option>
+          </select></label>
+          <label>Telefon<input class="fc-input" name="phone" value="${esc(player.phone || "")}"></label>
+          <label>Email<input class="fc-input" name="email" type="email" value="${esc(player.email || "")}"></label>
+          <label>Tutore<input class="fc-input" name="guardian_name" value="${esc(player.guardian_name || "")}"></label>
+          <label>Telefon tutore<input class="fc-input" name="guardian_phone" value="${esc(player.guardian_phone || "")}"></label>
+          <div class="fc-inline-actions"><button class="fc-btn" type="submit">Salveaza</button><button class="fc-btn fc-btn-danger fc-cancel" type="button">Anuleaza</button></div>
+        </form></td>`;
+        tableRow.querySelector(".fc-cancel").onclick = () => {
+          tableRow.innerHTML = original;
+          tableRow.dataset.fcInlineReady = "";
+          void originalPlayerTable();
+        };
+        tableRow.querySelector("form").onsubmit = async (submitEvent) => {
+          submitEvent.preventDefault();
+          const values = Object.fromEntries(new FormData(submitEvent.currentTarget));
+          for (const numeric of ["shirt_number", "height_cm", "weight_kg"]) {
+            values[numeric] = values[numeric] === "" ? null : Number(values[numeric]);
+          }
+          try {
+            await request(`/rest/v1/players?id=eq.${player.id}`, { method: "PATCH", body: JSON.stringify(values) });
+            tableRow.innerHTML = original;
+            tableRow.dataset.fcInlineReady = "";
+            window.setTimeout(() => window.location.reload(), 100);
+          } catch (error) {
+            alert(error.message);
+          }
+        };
+      };
+    });
+  };
+
   const coaches = async () => {
     const grid = panel("Editare antrenori");
     const rows = await request("/rest/v1/coaches?select=*&order=full_name");
@@ -180,7 +251,7 @@
       if (!host || (!force && host.querySelector("[data-fc-admin-tools]"))) return;
       host.querySelectorAll("[data-fc-admin-tools]").forEach((node) => node.remove());
       if (page === "Utilizatori") await users();
-      if (page === "Jucatori") await players();
+      if (page === "Jucatori") await originalPlayerTable();
       if (page === "Antrenori") await coaches();
       if (page === "Parinti") await players(true);
       if (page === "Prezente") await attendance();
