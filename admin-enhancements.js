@@ -11,6 +11,7 @@
         const value = JSON.parse(localStorage.getItem(key) || "{}");
         if (value.access_token) return value;
         if (value.currentSession?.access_token) return value.currentSession;
+        if (value.session?.access_token) return value.session;
       } catch {}
     }
     return null;
@@ -28,14 +29,21 @@
         ...(options.headers || {}),
       },
     });
-    if (!response.ok) throw new Error((await response.json().catch(() => ({}))).message || "Operatia nu a reusit.");
-    if (response.status === 204) return [];
-    return response.json();
+    const text = await response.text();
+    const payload = text ? JSON.parse(text) : [];
+    if (!response.ok) throw new Error([payload.message, payload.details, payload.hint].filter(Boolean).join(" ") || "Operatia nu a reusit.");
+    return payload;
   };
 
   const activePage = () => document.querySelector(".nav-item-active span")?.textContent?.trim() || "";
   const content = () => document.querySelector("main section.px-4.py-6");
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
+  const normalize = (values, nullable = [], numeric = []) => {
+    const result = { ...values };
+    nullable.forEach((key) => { if (result[key] === "") result[key] = null; });
+    numeric.forEach((key) => { result[key] = result[key] === "" || result[key] === null ? null : Number(result[key]); });
+    return result;
+  };
 
   const style = document.createElement("style");
   style.textContent = `
@@ -46,7 +54,7 @@
     .fc-btn{border:0;border-radius:10px;padding:9px 12px;background:#06b6d4;color:#09090b;font-weight:700;cursor:pointer}
     .fc-btn-danger{background:#7f1d1d;color:#fff}.fc-input{width:100%;border:1px solid rgba(255,255,255,.12);border-radius:10px;background:#27272a;color:#fafafa;padding:10px}
     .fc-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.fc-form label{color:#a1a1aa;font-size:13px}.fc-form .wide{grid-column:1/-1}
-    .fc-inline-form{grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;width:100%}.fc-inline-form label{color:#a1a1aa;font-size:12px}.fc-inline-actions{grid-column:1/-1;display:flex;gap:8px}.fc-editable{cursor:pointer}.fc-editable:hover{border-color:rgba(6,182,212,.45)}
+    .fc-inline-form{grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;width:100%}.fc-inline-form label{color:#a1a1aa;font-size:12px}.fc-inline-actions{grid-column:1/-1;display:flex;gap:8px}.fc-inline-message{grid-column:1/-1;margin:0;color:#22c55e;font-size:13px}.fc-inline-error{color:#fca5a5}.fc-editable{cursor:pointer}.fc-editable:hover{border-color:rgba(6,182,212,.45)}
     .fc-command{margin-bottom:20px;overflow:hidden;border:1px solid rgba(255,255,255,.1);border-radius:16px;background:#18181b}
     .fc-command-inner{display:grid;grid-template-columns:1.2fr .8fr;gap:24px;padding:26px}.fc-command-logo{width:76px;height:76px;object-fit:contain}
     .fc-command-stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.fc-command-stat{padding:14px;border-radius:12px;background:rgba(255,255,255,.04)}
@@ -178,6 +186,7 @@
           <label>Tutore<input class="fc-input" name="guardian_name" value="${esc(player.guardian_name || "")}"></label>
           <label>Telefon tutore<input class="fc-input" name="guardian_phone" value="${esc(player.guardian_phone || "")}"></label>
           <div class="fc-inline-actions"><button class="fc-btn" type="submit">Salveaza</button><button class="fc-btn fc-btn-danger fc-cancel" type="button">Anuleaza</button></div>
+          <p class="fc-inline-message"></p>
         </form></td>`;
         tableRow.querySelector(".fc-cancel").onclick = () => {
           tableRow.innerHTML = original;
@@ -186,18 +195,216 @@
         };
         tableRow.querySelector("form").onsubmit = async (submitEvent) => {
           submitEvent.preventDefault();
-          const values = Object.fromEntries(new FormData(submitEvent.currentTarget));
-          for (const numeric of ["shirt_number", "height_cm", "weight_kg"]) {
-            values[numeric] = values[numeric] === "" ? null : Number(values[numeric]);
-          }
+          const form = submitEvent.currentTarget;
+          const message = form.querySelector(".fc-inline-message");
+          const saveButton = form.querySelector('button[type="submit"]');
+          const values = normalize(
+            Object.fromEntries(new FormData(form)),
+            ["birth_date", "position", "dominant_foot", "phone", "email", "guardian_name", "guardian_phone"],
+            ["shirt_number", "height_cm", "weight_kg"],
+          );
           try {
+            saveButton.disabled = true;
+            saveButton.textContent = "Se salveaza...";
+            message.classList.remove("fc-inline-error");
+            message.textContent = "";
             await request(`/rest/v1/players?id=eq.${player.id}`, { method: "PATCH", body: JSON.stringify(values) });
-            tableRow.innerHTML = original;
-            tableRow.dataset.fcInlineReady = "";
-            window.setTimeout(() => window.location.reload(), 100);
+            message.textContent = "Modificarile au fost salvate.";
+            window.setTimeout(() => window.location.reload(), 500);
           } catch (error) {
-            alert(error.message);
+            message.classList.add("fc-inline-error");
+            message.textContent = error.message;
+            saveButton.disabled = false;
+            saveButton.textContent = "Salveaza";
           }
+        };
+      };
+    });
+  };
+
+  const findTable = (...terms) => [...(content()?.querySelectorAll("table") || [])].find((table) =>
+    terms.every((term) => table.textContent?.toLowerCase().includes(term.toLowerCase())),
+  );
+
+  const originalUsersTable = async () => {
+    const table = findTable("rol", "status");
+    if (!table) return;
+    const users = await request("/rest/v1/profiles?select=id,full_name,email,phone,role&order=created_at.desc");
+    [...table.querySelectorAll("tbody tr")].forEach((row) => {
+      if (row.dataset.fcInlineReady) return;
+      const text = row.textContent || "";
+      const user = users.find((item) => item.email && text.includes(item.email));
+      if (!user) return;
+      row.dataset.fcInlineReady = "true";
+      row.classList.add("fc-editable");
+      row.title = "Dublu click pentru redactarea utilizatorului";
+      row.ondblclick = (event) => {
+        if (event.target.closest("button,input,select") || row.querySelector("form")) return;
+        const original = row.innerHTML;
+        row.innerHTML = `<td colspan="${table.querySelectorAll("thead th").length || 4}" style="padding:16px"><form class="fc-inline-form">
+          <label>Nume<input class="fc-input" name="full_name" value="${esc(user.full_name || "")}"></label>
+          <label>Telefon<input class="fc-input" name="phone" value="${esc(user.phone || "")}"></label>
+          <label>Rol<select class="fc-input" name="role">${["administrator","director_sportiv","antrenor","jucator","parinte"].map((role) => `<option value="${role}" ${role === user.role ? "selected" : ""}>${role}</option>`).join("")}</select></label>
+          <div class="fc-inline-actions"><button class="fc-btn" type="submit">Salveaza</button><button class="fc-btn fc-btn-danger fc-cancel" type="button">Anuleaza</button></div><p class="fc-inline-message"></p>
+        </form></td>`;
+        row.querySelector(".fc-cancel").onclick = () => { row.innerHTML = original; row.dataset.fcInlineReady = ""; void originalUsersTable(); };
+        row.querySelector("form").onsubmit = async (submitEvent) => {
+          submitEvent.preventDefault();
+          const form = submitEvent.currentTarget;
+          const values = normalize(Object.fromEntries(new FormData(form)), ["full_name", "phone"]);
+          try {
+            await request(`/rest/v1/profiles?id=eq.${user.id}`, { method: "PATCH", body: JSON.stringify(values) });
+            form.querySelector(".fc-inline-message").textContent = "Utilizator actualizat. Rolul devine activ la urmatoarea autentificare.";
+            setTimeout(() => location.reload(), 700);
+          } catch (error) { form.querySelector(".fc-inline-message").classList.add("fc-inline-error"); form.querySelector(".fc-inline-message").textContent = error.message; }
+        };
+      };
+    });
+  };
+
+  const originalCoachesTable = async () => {
+    const table = findTable("program", "permisiuni");
+    if (!table) return;
+    const coaches = await request("/rest/v1/coaches?select=*&order=full_name");
+    [...table.querySelectorAll("tbody tr")].forEach((row) => {
+      if (row.dataset.fcInlineReady) return;
+      const text = row.textContent || "";
+      const coach = coaches.find((item) => text.toLowerCase().includes(item.full_name.toLowerCase()));
+      if (!coach) return;
+      row.dataset.fcInlineReady = "true";
+      row.classList.add("fc-editable");
+      row.title = "Dublu click pentru redactarea antrenorului";
+      row.ondblclick = (event) => {
+        if (event.target.closest("button,input,select") || row.querySelector("form")) return;
+        const original = row.innerHTML;
+        row.innerHTML = `<td colspan="${table.querySelectorAll("thead th").length || 6}" style="padding:16px"><form class="fc-inline-form">
+          <label>Nume<input class="fc-input" name="full_name" value="${esc(coach.full_name)}"></label><label>Rol<input class="fc-input" name="role_title" value="${esc(coach.role_title)}"></label>
+          <label>Telefon<input class="fc-input" name="phone" value="${esc(coach.phone || "")}"></label><label>Email<input class="fc-input" name="email" value="${esc(coach.email || "")}"></label>
+          <label>Program<input class="fc-input" name="schedule" value="${esc(coach.schedule || "")}"></label><label>Permisiuni<input class="fc-input" name="permissions" value="${esc(coach.permissions || "")}"></label>
+          <div class="fc-inline-actions"><button class="fc-btn" type="submit">Salveaza</button><button class="fc-btn fc-btn-danger fc-cancel" type="button">Anuleaza</button></div><p class="fc-inline-message"></p>
+        </form></td>`;
+        row.querySelector(".fc-cancel").onclick = () => { row.innerHTML = original; row.dataset.fcInlineReady = ""; void originalCoachesTable(); };
+        row.querySelector("form").onsubmit = async (submitEvent) => {
+          submitEvent.preventDefault();
+          const form = submitEvent.currentTarget;
+          try {
+            await request(`/rest/v1/coaches?id=eq.${coach.id}`, { method: "PATCH", body: JSON.stringify(normalize(Object.fromEntries(new FormData(form)), ["phone","email","schedule","permissions"])) });
+            form.querySelector(".fc-inline-message").textContent = "Antrenor salvat.";
+            setTimeout(() => location.reload(), 500);
+          } catch (error) { form.querySelector(".fc-inline-message").classList.add("fc-inline-error"); form.querySelector(".fc-inline-message").textContent = error.message; }
+        };
+      };
+    });
+  };
+
+  const originalParentsTable = async () => {
+    const table = findTable("tutore", "copil") || findTable("guardian", "child");
+    if (!table) return;
+    const players = await request("/rest/v1/players?select=id,first_name,last_name,email,guardian_name,guardian_phone&order=last_name");
+    [...table.querySelectorAll("tbody tr")].forEach((row) => {
+      if (row.dataset.fcInlineReady) return;
+      const text = row.textContent || "";
+      const player = players.find((item) => text.toLowerCase().includes(`${item.first_name} ${item.last_name}`.toLowerCase()) || (item.email && text.includes(item.email)));
+      if (!player) return;
+      row.dataset.fcInlineReady = "true";
+      row.classList.add("fc-editable");
+      row.title = "Dublu click pentru redactarea tutorelui";
+      row.ondblclick = (event) => {
+        if (event.target.closest("button,input") || row.querySelector("form")) return;
+        const original = row.innerHTML;
+        row.innerHTML = `<td colspan="${table.querySelectorAll("thead th").length || 5}" style="padding:16px"><form class="fc-inline-form">
+          <label>Parinte / tutore<input class="fc-input" name="guardian_name" value="${esc(player.guardian_name || "")}"></label>
+          <label>Telefon tutore<input class="fc-input" name="guardian_phone" value="${esc(player.guardian_phone || "")}"></label>
+          <div class="fc-inline-actions"><button class="fc-btn" type="submit">Salveaza</button><button class="fc-btn fc-btn-danger fc-cancel" type="button">Anuleaza</button></div><p class="fc-inline-message"></p>
+        </form></td>`;
+        row.querySelector(".fc-cancel").onclick = () => { row.innerHTML = original; row.dataset.fcInlineReady = ""; void originalParentsTable(); };
+        row.querySelector("form").onsubmit = async (submitEvent) => {
+          submitEvent.preventDefault();
+          const form = submitEvent.currentTarget;
+          try {
+            await request(`/rest/v1/players?id=eq.${player.id}`, { method: "PATCH", body: JSON.stringify(normalize(Object.fromEntries(new FormData(form)), ["guardian_name","guardian_phone"])) });
+            form.querySelector(".fc-inline-message").textContent = "Datele tutorelui au fost salvate.";
+            setTimeout(() => location.reload(), 500);
+          } catch (error) { form.querySelector(".fc-inline-message").classList.add("fc-inline-error"); form.querySelector(".fc-inline-message").textContent = error.message; }
+        };
+      };
+    });
+  };
+
+  const originalAttendanceCards = async () => {
+    const players = await request("/rest/v1/players?select=id,first_name,last_name,player_stats(training_attendance)&registration_status=eq.active&order=last_name");
+    const host = content();
+    players.forEach((player) => {
+      const card = [...(host?.querySelectorAll("button,div") || [])].find((node) =>
+        !node.dataset.fcAttendance &&
+        node.children.length > 0 &&
+        node.textContent?.toLowerCase().includes(`${player.first_name} ${player.last_name}`.toLowerCase()) &&
+        node.textContent?.includes("%"),
+      );
+      if (!card) return;
+      card.dataset.fcAttendance = "true";
+      card.title = "Dublu click pentru modificarea prezentei";
+      card.ondblclick = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (card.querySelector(".fc-att-controls")) return;
+        const controls = document.createElement("div");
+        controls.className = "fc-att-controls";
+        controls.style.cssText = "display:flex;gap:7px;margin-top:12px";
+        controls.innerHTML = [0,25,50,75,100].map((value) => `<button type="button" class="fc-btn" data-value="${value}">${value}%</button>`).join("");
+        controls.querySelectorAll("button").forEach((button) => button.onclick = async (clickEvent) => {
+          clickEvent.stopPropagation();
+          try {
+            await request(`/rest/v1/player_stats?player_id=eq.${player.id}`, { method: "PATCH", body: JSON.stringify({ training_attendance: Number(button.dataset.value), updated_at: new Date().toISOString() }) });
+            location.reload();
+          } catch (error) { alert(error.message); }
+        });
+        card.appendChild(controls);
+      };
+    });
+  };
+
+  const originalDocumentsTable = async () => {
+    const table = findTable("categorie", "creat") || findTable("categorie", "tip");
+    if (!table) return;
+    const documents = await request("/rest/v1/documents?select=id,name,category,file_type,storage_path&order=created_at.desc");
+    [...table.querySelectorAll("tbody tr")].forEach((row) => {
+      if (row.dataset.fcDocument) return;
+      const documentRow = documents.find((item) => row.textContent?.includes(item.name));
+      if (!documentRow) return;
+      row.dataset.fcDocument = "true";
+      row.classList.add("fc-editable");
+      row.title = "Dublu click pentru redactare";
+      const actionCell = document.createElement("td");
+      actionCell.style.padding = "12px";
+      actionCell.innerHTML = '<button type="button" class="fc-btn fc-btn-danger">Sterge</button>';
+      actionCell.querySelector("button").onclick = async (event) => {
+        event.stopPropagation();
+        if (!confirm(`Stergi documentul ${documentRow.name}?`)) return;
+        try {
+          if (documentRow.storage_path) await request(`/storage/v1/object/club-documents/${documentRow.storage_path.split("/").map(encodeURIComponent).join("/")}`, { method: "DELETE" });
+          await request(`/rest/v1/documents?id=eq.${documentRow.id}`, { method: "DELETE" });
+          location.reload();
+        } catch (error) { alert(error.message); }
+      };
+      row.appendChild(actionCell);
+      row.ondblclick = (event) => {
+        if (event.target.closest("button,input") || row.querySelector("form")) return;
+        const original = row.innerHTML;
+        row.innerHTML = `<td colspan="${table.querySelectorAll("thead th").length + 1}" style="padding:16px"><form class="fc-inline-form">
+          <label>Nume document<input class="fc-input" name="name" value="${esc(documentRow.name)}"></label>
+          <label>Categorie<input class="fc-input" name="category" value="${esc(documentRow.category)}"></label>
+          <label>Tip<input class="fc-input" name="file_type" value="${esc(documentRow.file_type || "")}"></label>
+          <div class="fc-inline-actions"><button class="fc-btn" type="submit">Salveaza</button><button class="fc-btn fc-btn-danger fc-cancel" type="button">Anuleaza</button></div><p class="fc-inline-message"></p>
+        </form></td>`;
+        row.querySelector(".fc-cancel").onclick = () => { row.innerHTML = original; row.dataset.fcDocument = ""; void originalDocumentsTable(); };
+        row.querySelector("form").onsubmit = async (submitEvent) => {
+          submitEvent.preventDefault();
+          const form = submitEvent.currentTarget;
+          try {
+            await request(`/rest/v1/documents?id=eq.${documentRow.id}`, { method: "PATCH", body: JSON.stringify(normalize(Object.fromEntries(new FormData(form)), ["file_type"])) });
+            location.reload();
+          } catch (error) { form.querySelector(".fc-inline-message").classList.add("fc-inline-error"); form.querySelector(".fc-inline-message").textContent = error.message; }
         };
       };
     });
@@ -250,12 +457,12 @@
       const host = content();
       if (!host || (!force && host.querySelector("[data-fc-admin-tools]"))) return;
       host.querySelectorAll("[data-fc-admin-tools]").forEach((node) => node.remove());
-      if (page === "Utilizatori") await users();
+      if (page === "Utilizatori") await originalUsersTable();
       if (page === "Jucatori") await originalPlayerTable();
-      if (page === "Antrenori") await coaches();
-      if (page === "Parinti") await players(true);
-      if (page === "Prezente") await attendance();
-      if (page === "Documente") await documents();
+      if (page === "Antrenori") await originalCoachesTable();
+      if (page === "Parinti") await originalParentsTable();
+      if (page === "Prezente") await originalAttendanceCards();
+      if (page === "Documente") await originalDocumentsTable();
     } catch (error) { console.error(error); }
     finally { rendering = false; }
   };
