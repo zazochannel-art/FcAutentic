@@ -10,7 +10,8 @@
     const loginButton = [...document.querySelectorAll("button")].find(
       (button) => button.textContent?.trim() === "Login Admin",
     );
-    loginButton?.click();
+    removePortalPage();
+    window.setTimeout(() => loginButton?.click(), 0);
   };
 
   const render = () => {
@@ -22,6 +23,11 @@
     const buttonTexts = [...document.querySelectorAll("button")].map(
       (button) => button.textContent?.trim(),
     );
+    const adminLoginIsOpen = document.body.textContent?.includes("Cont administrator");
+    if (adminLoginIsOpen) {
+      removePortalPage();
+      return;
+    }
     if (buttonTexts.includes("Admin ON")) {
       removePortalPage();
       return;
