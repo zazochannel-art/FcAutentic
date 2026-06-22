@@ -149,7 +149,10 @@
     );
     if (!table) return;
 
-    const players = await request("/rest/v1/players?select=id,first_name,last_name,birth_date,position,shirt_number,height_cm,weight_kg,dominant_foot,phone,email,guardian_name,guardian_phone&registration_status=eq.active&order=last_name");
+    const [players, teams] = await Promise.all([
+      request("/rest/v1/players?select=id,first_name,last_name,birth_date,position,shirt_number,height_cm,weight_kg,dominant_foot,phone,email,guardian_name,guardian_phone,team_id&registration_status=eq.active&order=last_name"),
+      request("/rest/v1/teams?select=id,category,name&order=category"),
+    ]);
     const tableRows = [...table.querySelectorAll("tbody tr")];
 
     tableRows.forEach((tableRow) => {
@@ -171,6 +174,10 @@
           <label>Prenume<input class="fc-input" name="first_name" value="${esc(player.first_name)}"></label>
           <label>Nume<input class="fc-input" name="last_name" value="${esc(player.last_name)}"></label>
           <label>Data nasterii<input class="fc-input" name="birth_date" type="date" value="${esc(player.birth_date || "")}"></label>
+          <label>Categorie<select class="fc-input" name="team_id">
+            <option value="">Fara categorie</option>
+            ${teams.map((team) => `<option value="${team.id}" ${team.id === player.team_id ? "selected" : ""}>${esc(team.category)} - ${esc(team.name)}</option>`).join("")}
+          </select></label>
           <label>Pozitie<input class="fc-input" name="position" value="${esc(player.position || "")}"></label>
           <label>Numar tricou<input class="fc-input" name="shirt_number" type="number" min="1" max="99" value="${esc(player.shirt_number || "")}"></label>
           <label>Inaltime (cm)<input class="fc-input" name="height_cm" type="number" value="${esc(player.height_cm || "")}"></label>
@@ -200,7 +207,7 @@
           const saveButton = form.querySelector('button[type="submit"]');
           const values = normalize(
             Object.fromEntries(new FormData(form)),
-            ["birth_date", "position", "dominant_foot", "phone", "email", "guardian_name", "guardian_phone"],
+            ["birth_date", "team_id", "position", "dominant_foot", "phone", "email", "guardian_name", "guardian_phone"],
             ["shirt_number", "height_cm", "weight_kg"],
           );
           try {
