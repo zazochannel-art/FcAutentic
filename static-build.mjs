@@ -8,6 +8,7 @@ fs.mkdirSync(output, { recursive: true });
 for (const file of [
   "index.html",
   "app.js",
+  "player-profile-premium.js",
   "admin-enhancements.js",
   "portal-guard.js",
   "styles.css",

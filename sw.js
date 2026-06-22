@@ -1,5 +1,5 @@
-const CACHE_NAME = "fc-autentic-v3";
-const ASSETS = ["/", "/index.html", "/manifest.webmanifest", "/icon.svg", "/styles.css", "/app.js", "/fc-autentic-logo-small.png", "/hero-football.jpg"];
+const CACHE_NAME = "fc-autentic-v4";
+const ASSETS = ["/", "/index.html", "/manifest.webmanifest", "/icon.svg", "/styles.css", "/app.js", "/player-profile-premium.js", "/admin-enhancements.js", "/portal-guard.js", "/fc-autentic-logo-small.png", "/hero-football.jpg"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS)));
@@ -17,7 +17,7 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   const isApplicationAsset =
     event.request.mode === "navigate" ||
-    url.pathname.endsWith("/app.js") ||
+    url.pathname.endsWith(".js") ||
     url.pathname.endsWith("/styles.css");
 
   if (isApplicationAsset) {
