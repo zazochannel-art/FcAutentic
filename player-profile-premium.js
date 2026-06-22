@@ -53,6 +53,9 @@
     } catch {
       payload = text;
     }
+    if (response.status === 401) {
+      throw new Error("Sesiunea a expirat. Autentifica-te din nou.");
+    }
     if (!response.ok) {
       throw new Error(
         [payload?.message, payload?.details, payload?.hint].filter(Boolean).join(" ") ||
@@ -64,9 +67,12 @@
 
   const one = (value) => Array.isArray(value) ? value[0] || null : value || null;
   const number = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
-  const dateRo = (value) => value
-    ? new Intl.DateTimeFormat("ro-RO", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(value))
-    : "Necompletat";
+  const dateRo = (value) => {
+    if (!value) return "Necompletat";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "Data invalida";
+    return new Intl.DateTimeFormat("ro-RO", { day: "2-digit", month: "short", year: "numeric" }).format(date);
+  };
   const age = (birthDate) => {
     if (!birthDate) return null;
     const born = new Date(birthDate);
@@ -210,9 +216,10 @@
       .filter((row) => row.rating !== null && row.rating !== undefined)
       .slice(0, 8)
       .reverse();
-    const chartValues = recentRatings.length
-      ? recentRatings.map((row) => ({ label: dateRo(one(row.matches)?.starts_at).split(" ")[0], value: number(row.rating) * 10 }))
-      : [55, 61, 58, 66, 70, 68, 74, number(performance.average_rating, 6) * 10].map((value, index) => ({ label: `M${index + 1}`, value }));
+    const chartValues = recentRatings.map((row) => ({
+      label: dateRo(one(row.matches)?.starts_at).split(" ")[0],
+      value: number(row.rating) * 10,
+    }));
 
     return `
       <div class="pp-grid-2">
@@ -233,9 +240,7 @@
         </section>
         <section class="pp-card">
           <div class="pp-card-head"><div><h2>Evolutia performantei</h2><p>Ratingul ultimelor meciuri</p></div><strong style="color:#67e8f9">${number(performance.average_rating, 0).toFixed(1)}</strong></div>
-          <div class="pp-chart">
-            ${chartValues.map((point) => `<div class="pp-chart-col"><div class="pp-chart-bar" style="height:${Math.max(8, Math.min(100, point.value))}%"></div><small>${esc(point.label)}</small></div>`).join("")}
-          </div>
+          ${chartValues.length ? `<div class="pp-chart">${chartValues.map((point) => `<div class="pp-chart-col"><div class="pp-chart-bar" style="height:${Math.max(8, Math.min(100, point.value))}%"></div><small>${esc(point.label)}</small></div>`).join("")}</div>` : `<div class="pp-empty">Graficul va aparea dupa introducerea ratingurilor pe meci.</div>`}
         </section>
         <section class="pp-card">
           <div class="pp-card-head"><div><h2>Profil tehnic</h2><p>Evaluari actualizate de staff</p></div></div>
@@ -250,9 +255,7 @@
         </section>
         <section class="pp-card">
           <div class="pp-card-head"><div><h2>Prezenta recenta</h2><p>Ultimele antrenamente inregistrate</p></div></div>
-          <div class="pp-chart">
-            ${(attendance.length ? attendance.slice(0, 8).reverse() : Array.from({ length: 8 }, () => ({ present: false }))).map((row, index) => `<div class="pp-chart-col"><div class="pp-chart-bar" style="height:${row.present ? 88 : 16}%;background:${row.present ? "linear-gradient(#22c55e,#06b6d4)" : "#3f3f46"}"></div><small>${row.attended_on ? dateRo(row.attended_on).split(" ")[0] : index + 1}</small></div>`).join("")}
-          </div>
+          ${attendance.length ? `<div class="pp-chart">${attendance.slice(0, 8).reverse().map((row) => `<div class="pp-chart-col"><div class="pp-chart-bar" style="height:${row.present ? 88 : 16}%;background:${row.present ? "linear-gradient(#22c55e,#06b6d4)" : "#3f3f46"}"></div><small>${dateRo(row.attended_on).split(" ")[0]}</small></div>`).join("")}</div>` : `<div class="pp-empty">Graficul va aparea dupa inregistrarea prezentelor.</div>`}
         </section>
       </div>`;
   };
@@ -491,9 +494,9 @@
       event.preventDefault();
       const form = event.currentTarget;
       const notification_preferences = {
-        in_app: form.in_app.checked,
-        email: form.email.checked,
-        browser: form.browser.checked,
+        in_app: form.querySelector('[name="in_app"]').checked,
+        email: form.querySelector('[name="email"]').checked,
+        browser: form.querySelector('[name="browser"]').checked,
       };
       try {
         await request(`/rest/v1/profiles?id=eq.${profile.id}`, { method: "PATCH", body: JSON.stringify({ notification_preferences }) });

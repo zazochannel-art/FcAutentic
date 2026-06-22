@@ -1,5 +1,6 @@
 (() => {
   let portalPage;
+  const publicUrl = window.FC_AUTENTIC_PUBLIC_URL || "https://fcautentic.md";
 
   const removePortalPage = () => {
     portalPage?.remove();
@@ -12,6 +13,14 @@
     );
     removePortalPage();
     window.setTimeout(() => loginButton?.click(), 0);
+  };
+
+  const openPlayerLogin = () => {
+    const playerButton = [...document.querySelectorAll("button")].find(
+      (button) => button.textContent?.trim() === "Cont jucator",
+    );
+    removePortalPage();
+    window.setTimeout(() => playerButton?.click(), 0);
   };
 
   const render = () => {
@@ -43,7 +52,10 @@
           <img src="./fc-autentic-logo-small.png" alt="FC Autentic" style="width:50px;height:50px;object-fit:contain">
           <span><strong style="display:block;font-size:15px">FC AUTENTIC</strong><small style="color:#a1a1aa">Portal intern al clubului</small></span>
         </button>
-        <button id="portal-login" style="border:0;border-radius:12px;padding:12px 18px;background:linear-gradient(90deg,#06b6d4,#8b5cf6);color:#09090b;font-weight:800;cursor:pointer">Logare Admin</button>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+          <button id="portal-player-login" style="border:1px solid rgba(255,255,255,.16);border-radius:12px;padding:12px 18px;background:#18181b;color:#fafafa;font-weight:800;cursor:pointer">Cont Jucator</button>
+          <button id="portal-login" style="border:0;border-radius:12px;padding:12px 18px;background:linear-gradient(90deg,#06b6d4,#8b5cf6);color:#09090b;font-weight:800;cursor:pointer">Logare Admin</button>
+        </div>
       </header>
 
       <main>
@@ -146,8 +158,9 @@
 
     document.body.appendChild(portalPage);
     portalPage.querySelector("#portal-login")?.addEventListener("click", openLogin);
+    portalPage.querySelector("#portal-player-login")?.addEventListener("click", openPlayerLogin);
     portalPage.querySelector("#portal-home")?.addEventListener("click", () => {
-      window.location.hash = "";
+      window.location.href = publicUrl;
     });
   };
 

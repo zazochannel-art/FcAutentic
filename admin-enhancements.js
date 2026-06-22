@@ -30,7 +30,13 @@
       },
     });
     const text = await response.text();
-    const payload = text ? JSON.parse(text) : [];
+    let payload = [];
+    try {
+      payload = text ? JSON.parse(text) : [];
+    } catch {
+      payload = { message: text || "Raspuns invalid de la server." };
+    }
+    if (response.status === 401) throw new Error("Sesiunea a expirat. Autentifica-te din nou.");
     if (!response.ok) throw new Error([payload.message, payload.details, payload.hint].filter(Boolean).join(" ") || "Operatia nu a reusit.");
     return payload;
   };
@@ -93,13 +99,31 @@
     return node.querySelector(".fc-grid");
   };
 
-  const dashboard = () => {
+  const dashboard = async () => {
     const host = content();
     if (!host || host.querySelector("[data-fc-command]")) return;
+    const now = new Date().toISOString();
+    const [players, stats, profiles, matches] = await Promise.all([
+      request("/rest/v1/players?select=first_name,last_name,birth_date,position,team_id,registration_status&registration_status=eq.active"),
+      request("/rest/v1/player_stats?select=training_attendance"),
+      request("/rest/v1/profiles?select=role"),
+      request(`/rest/v1/matches?select=opponent,starts_at&starts_at=gte.${encodeURIComponent(now)}&order=starts_at.asc&limit=1`),
+    ]);
+    const completenessFields = ["first_name", "last_name", "birth_date", "position", "team_id"];
+    const completeness = players.length
+      ? Math.round(players.reduce((sum, player) => sum + completenessFields.filter((field) => player[field]).length / completenessFields.length, 0) / players.length * 100)
+      : 0;
+    const attendanceAverage = stats.length
+      ? Math.round(stats.reduce((sum, row) => sum + Number(row.training_attendance || 0), 0) / stats.length)
+      : 0;
+    const activeRoles = new Set(profiles.map((profile) => profile.role).filter(Boolean)).size;
+    const nextMatch = matches[0]
+      ? `${matches[0].opponent} · ${new Date(matches[0].starts_at).toLocaleDateString("ro-RO", { day: "2-digit", month: "short" })}`
+      : "Neprogramat";
     const node = document.createElement("div");
     node.className = "fc-command";
     node.dataset.fcCommand = "true";
-    node.innerHTML = `<div class="fc-command-inner"><div><div style="display:flex;align-items:center;gap:16px"><img class="fc-command-logo" src="./fc-autentic-logo-small.png" alt="FC Autentic logo"><span style="color:#06b6d4;font-size:12px;font-weight:700">Live academy operating system</span></div><h1 style="margin:18px 0 0;font-size:34px">FC Autentic Command Center</h1><p style="margin:10px 0 0;line-height:1.7">Platforma premium pentru loturi, antrenamente, meciuri, documente, roluri si comunicare in timp real.</p></div><div class="fc-command-stats"><div class="fc-command-stat"><small>Health score</small><strong style="display:block;font-size:22px;margin-top:8px">96%</strong></div><div class="fc-command-stat"><small>Attendance</small><strong style="display:block;font-size:22px;margin-top:8px">91%</strong></div><div class="fc-command-stat"><small>Active roles</small><strong style="display:block;font-size:22px;margin-top:8px">5</strong></div><div class="fc-command-stat"><small>Next match</small><strong style="display:block;font-size:22px;margin-top:8px">20 Iun</strong></div></div></div>`;
+    node.innerHTML = `<div class="fc-command-inner"><div><div style="display:flex;align-items:center;gap:16px"><img class="fc-command-logo" src="./fc-autentic-logo-small.png" alt="FC Autentic logo"><span style="color:#06b6d4;font-size:12px;font-weight:700">Live academy operating system</span></div><h1 style="margin:18px 0 0;font-size:34px">FC Autentic Command Center</h1><p style="margin:10px 0 0;line-height:1.7">Platforma premium pentru loturi, antrenamente, meciuri, documente, roluri si comunicare in timp real.</p></div><div class="fc-command-stats"><div class="fc-command-stat"><small>Completare profiluri</small><strong style="display:block;font-size:22px;margin-top:8px">${completeness}%</strong></div><div class="fc-command-stat"><small>Prezenta medie</small><strong style="display:block;font-size:22px;margin-top:8px">${attendanceAverage}%</strong></div><div class="fc-command-stat"><small>Roluri active</small><strong style="display:block;font-size:22px;margin-top:8px">${activeRoles}</strong></div><div class="fc-command-stat"><small>Urmatorul meci</small><strong style="display:block;font-size:16px;margin-top:8px">${esc(nextMatch)}</strong></div></div></div>`;
     host.prepend(node);
   };
 
@@ -371,6 +395,67 @@
     });
   };
 
+  const originalStatisticsTable = async () => {
+    const table = findTable("meciuri", "goluri", "assisturi");
+    if (!table) return;
+    const players = await request("/rest/v1/players?select=id,first_name,last_name,player_stats(*),player_performance(*)&registration_status=eq.active&order=last_name");
+    [...table.querySelectorAll("tbody tr")].forEach((row) => {
+      if (row.dataset.fcStatistics) return;
+      const text = (row.textContent || "").toLowerCase();
+      const player = players.find((item) => text.includes(`${item.first_name} ${item.last_name}`.toLowerCase()));
+      if (!player) return;
+      const totals = player.player_stats?.[0] || {};
+      const performance = player.player_performance?.[0] || {};
+      row.dataset.fcStatistics = "true";
+      row.classList.add("fc-editable");
+      row.title = "Dublu click pentru actualizarea statisticilor";
+      row.ondblclick = (event) => {
+        if (event.target.closest("button,input") || row.querySelector("form")) return;
+        const original = row.innerHTML;
+        row.innerHTML = `<td colspan="${table.querySelectorAll("thead th").length || 7}" style="padding:16px"><form class="fc-inline-form">
+          <label>Meciuri<input class="fc-input" name="matches" type="number" min="0" value="${Number(totals.matches || 0)}"></label>
+          <label>Goluri<input class="fc-input" name="goals" type="number" min="0" value="${Number(totals.goals || 0)}"></label>
+          <label>Assisturi<input class="fc-input" name="assists" type="number" min="0" value="${Number(totals.assists || 0)}"></label>
+          <label>Cartonase<input class="fc-input" name="cards" type="number" min="0" value="${Number(totals.cards || 0)}"></label>
+          <label>Prezenta (%)<input class="fc-input" name="training_attendance" type="number" min="0" max="100" step="0.1" value="${Number(totals.training_attendance || 0)}"></label>
+          <label>Rating general<input class="fc-input" name="overall_rating" type="number" min="1" max="99" value="${Number(performance.overall_rating || 60)}"></label>
+          <label>Rating mediu<input class="fc-input" name="average_rating" type="number" min="0" max="10" step="0.1" value="${Number(performance.average_rating || 0)}"></label>
+          <label>Minute jucate<input class="fc-input" name="minutes_played" type="number" min="0" value="${Number(performance.minutes_played || 0)}"></label>
+          <div class="fc-inline-actions"><button class="fc-btn" type="submit">Salveaza</button><button class="fc-btn fc-btn-danger fc-cancel" type="button">Anuleaza</button></div><p class="fc-inline-message"></p>
+        </form></td>`;
+        row.querySelector(".fc-cancel").onclick = () => { row.innerHTML = original; row.dataset.fcStatistics = ""; void originalStatisticsTable(); };
+        row.querySelector("form").onsubmit = async (submitEvent) => {
+          submitEvent.preventDefault();
+          const form = submitEvent.currentTarget;
+          const values = Object.fromEntries(new FormData(form));
+          const totalValues = normalize({
+            matches: values.matches,
+            goals: values.goals,
+            assists: values.assists,
+            cards: values.cards,
+            training_attendance: values.training_attendance,
+          }, [], ["matches", "goals", "assists", "cards", "training_attendance"]);
+          const performanceValues = normalize({
+            overall_rating: values.overall_rating,
+            average_rating: values.average_rating,
+            minutes_played: values.minutes_played,
+          }, [], ["overall_rating", "average_rating", "minutes_played"]);
+          try {
+            await Promise.all([
+              request(`/rest/v1/player_stats?player_id=eq.${player.id}`, { method: "PATCH", body: JSON.stringify({ ...totalValues, updated_at: new Date().toISOString() }) }),
+              request(`/rest/v1/player_performance?player_id=eq.${player.id}`, { method: "PATCH", body: JSON.stringify({ ...performanceValues, updated_at: new Date().toISOString() }) }),
+            ]);
+            form.querySelector(".fc-inline-message").textContent = "Statisticile au fost salvate.";
+            setTimeout(() => location.reload(), 600);
+          } catch (error) {
+            form.querySelector(".fc-inline-message").classList.add("fc-inline-error");
+            form.querySelector(".fc-inline-message").textContent = error.message;
+          }
+        };
+      };
+    });
+  };
+
   const originalDocumentsTable = async () => {
     const table = findTable("categorie", "creat") || findTable("categorie", "tip");
     if (!table) return;
@@ -454,12 +539,83 @@
     });
   };
 
+  const publicPublishing = async (type) => {
+    const isMatch = type === "matches";
+    const grid = panel(isMatch ? "Publicare meciuri pe site" : "Publicare program pe site");
+    const path = isMatch
+      ? "/rest/v1/matches?select=id,opponent,starts_at,is_public&order=starts_at.desc"
+      : "/rest/v1/calendar_events?select=id,title,starts_at,event_type,is_public&order=starts_at.desc";
+    const rows = await request(path);
+    grid.innerHTML = rows.length ? rows.map((row) => `<div class="fc-row">
+      <strong>${esc(isMatch ? row.opponent : row.title)}</strong>
+      <span>${esc(new Date(row.starts_at).toLocaleString("ro-RO"))}</span>
+      <span>${row.is_public ? "Vizibil pe site" : "Doar intern"}</span>
+      <button class="fc-btn ${row.is_public ? "fc-btn-danger" : ""}" data-id="${row.id}" data-public="${row.is_public}">${row.is_public ? "Ascunde" : "Publica"}</button>
+    </div>`).join("") : '<p style="color:#a1a1aa">Nu exista inregistrari.</p>';
+    grid.querySelectorAll("button[data-id]").forEach((button) => {
+      button.onclick = async () => {
+        const next = button.dataset.public !== "true";
+        await request(`/rest/v1/${type}?id=eq.${button.dataset.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ is_public: next, updated_at: new Date().toISOString() }),
+        });
+        await render(true);
+      };
+    });
+  };
+
+  const publicAnnouncements = async () => {
+    const grid = panel("Anunturi pe site-ul public");
+    const rows = await request("/rest/v1/public_announcements?select=*&order=created_at.desc");
+    grid.innerHTML = `<form class="fc-inline-form fc-announcement-create">
+      <label>Titlu<input class="fc-input" name="title" required></label>
+      <label>Text<input class="fc-input" name="body" required></label>
+      <label>Text buton<input class="fc-input" name="link_label"></label>
+      <label>Link<input class="fc-input" name="link_url" type="url"></label>
+      <div class="fc-inline-actions"><button class="fc-btn" type="submit">Publica anunt</button></div>
+      <p class="fc-inline-message"></p>
+    </form>
+    ${rows.map((row) => `<div class="fc-row">
+      <strong>${esc(row.title)}</strong><span>${esc(row.body)}</span>
+      <span>${row.is_active ? "Activ" : "Inactiv"}</span>
+      <div style="display:flex;gap:6px"><button class="fc-btn fc-toggle-announcement" data-id="${row.id}" data-active="${row.is_active}">${row.is_active ? "Dezactiveaza" : "Activeaza"}</button><button class="fc-btn fc-btn-danger fc-delete-announcement" data-id="${row.id}">Sterge</button></div>
+    </div>`).join("")}`;
+    grid.querySelector(".fc-announcement-create").onsubmit = async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const values = normalize(Object.fromEntries(new FormData(form)), ["link_label", "link_url"]);
+      try {
+        await request("/rest/v1/public_announcements", { method: "POST", body: JSON.stringify(values) });
+        await render(true);
+      } catch (error) {
+        form.querySelector(".fc-inline-message").classList.add("fc-inline-error");
+        form.querySelector(".fc-inline-message").textContent = error.message;
+      }
+    };
+    grid.querySelectorAll(".fc-toggle-announcement").forEach((button) => {
+      button.onclick = async () => {
+        await request(`/rest/v1/public_announcements?id=eq.${button.dataset.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ is_active: button.dataset.active !== "true", updated_at: new Date().toISOString() }),
+        });
+        await render(true);
+      };
+    });
+    grid.querySelectorAll(".fc-delete-announcement").forEach((button) => {
+      button.onclick = async () => {
+        if (!confirm("Stergi acest anunt public?")) return;
+        await request(`/rest/v1/public_announcements?id=eq.${button.dataset.id}`, { method: "DELETE" });
+        await render(true);
+      };
+    });
+  };
+
   const render = async (force = false) => {
     if (rendering || !document.querySelector("button") || !document.body.textContent?.includes("Admin ON")) return;
     rendering = true;
     try {
       const page = activePage();
-      if (page === "Dashboard") dashboard();
+      if (page === "Dashboard") await dashboard();
       else removeCommandFromSecondaryPages();
       const host = content();
       if (!host || (!force && host.querySelector("[data-fc-admin-tools]"))) return;
@@ -469,7 +625,11 @@
       if (page === "Antrenori") await originalCoachesTable();
       if (page === "Parinti") await originalParentsTable();
       if (page === "Prezente") await originalAttendanceCards();
+      if (page === "Statistici") await originalStatisticsTable();
       if (page === "Documente") await originalDocumentsTable();
+      if (page === "Calendar") await publicPublishing("calendar_events");
+      if (page === "Meciuri") await publicPublishing("matches");
+      if (page === "Notificari") await publicAnnouncements();
     } catch (error) { console.error(error); }
     finally { rendering = false; }
   };
