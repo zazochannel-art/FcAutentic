@@ -1,0 +1,15 @@
+{
+  "name": "FC AUTENTIC Academy",
+  "short_name": "FC Autentic",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#09090B",
+  "theme_color": "#09090B",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
